@@ -41,6 +41,7 @@ export default function WebGPUCanvas({
       <Canvas
         shadows={shadows}
         camera={camera}
+        dpr={[1, 1.5]} // cap retina rendering: this scene is fragment-bound, so pixel count dominates cost
         gl={async (props) => {
           const renderer = new THREE.WebGPURenderer({
             ...props,

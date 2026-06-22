@@ -59,10 +59,11 @@ function buildBuildingMaterial(layout, seed) {
   return createSkyscraperMaterial(varying(buildingBase));
 }
 
-// Position the sun for the given time of day, drive the key light from it, and
-// re-bake the sky into the IBL environment. Mirrors updateSun() in the example.
-function updateSun(ctx, scene, timeOfDay) {
-  const { sky, sun, sunLight, pmrem, envScene } = ctx;
+// Position the sun for the given time of day and drive the key light from it.
+// Cheap (no GPU work) so it can run live on every slider tick. Mirrors the sun
+// half of updateSun() in the example; the IBL re-bake is split out below.
+function updateSun(ctx, timeOfDay) {
+  const { sky, sun, sunLight } = ctx;
 
   const u = (timeOfDay - 12) / 6; // -1 sunrise, 0 noon, +1 sunset
   const elevation = Math.max(0, 1 - u * u) * 72; // degrees, peaks at noon
@@ -80,8 +81,14 @@ function updateSun(ctx, scene, timeOfDay) {
   sunLight.color.set(0xffb072).lerp(new THREE.Color(0xfff4e8), transmittance);
   sunLight.intensity = 6 * transmittance;
   sunLight.position.copy(sun).multiplyScalar(600);
+}
 
-  // re-bake the sky (without the sun disc) into the environment map for IBL
+// Re-bake the sky (without the sun disc) into the IBL environment map. This is a
+// full cubemap render + PMREM convolution, so it is debounced rather than run on
+// every slider tick.
+function bakeEnvironment(ctx, scene) {
+  const { sky, pmrem, envScene } = ctx;
+
   sky.showSunDisc.value = false;
   envScene.add(sky);
   const env = pmrem.fromScene(envScene).texture;
@@ -103,6 +110,13 @@ export default function Scene() {
   // --- one-time setup: persistent objects (sky, env, ground, key light) ----
   useEffect(() => {
     scene.environmentIntensity = 0.25; // sky as a soft fill; the sun is the key
+
+    // the city is static while orbiting — only `seed` changes its geometry and only
+    // `timeOfDay` moves the light — so the shadow map does NOT need re-rendering every
+    // frame. Freeze it and re-bake on demand (in the seed / timeOfDay effects); this
+    // drops a full re-raster of all 24 buildings from every single frame.
+    gl.shadowMap.autoUpdate = false;
+    gl.shadowMap.needsUpdate = true;
 
     const pmrem = new THREE.PMREMGenerator(gl);
 
@@ -136,7 +150,7 @@ export default function Scene() {
     sunLight.shadow.camera.top = 360;
     sunLight.shadow.camera.bottom = -40;
     sunLight.shadow.camera.far = 2400;
-    sunLight.shadow.mapSize.set(4096, 4096);
+    sunLight.shadow.mapSize.set(2048, 2048);
     sunLight.shadow.bias = -0.0004;
     scene.add(sunLight);
 
@@ -187,6 +201,7 @@ export default function Scene() {
     c.city.parameters.seed = seed;
     c.cityGroup = c.city.build({ building: c.material });
     scene.add(c.cityGroup);
+    gl.shadowMap.needsUpdate = true; // new geometry -> re-bake the frozen shadow map once
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed]);
 
@@ -194,7 +209,16 @@ export default function Scene() {
   useEffect(() => {
     const c = ctx.current;
     if (!c) return;
-    updateSun(c, scene, timeOfDay);
+
+    // the sun + key light update live (cheap); the env re-bake (a cubemap render
+    // + PMREM convolution) is debounced so dragging the slider doesn't fire one
+    // bake per 0.1 step
+    updateSun(c, timeOfDay);
+    gl.shadowMap.needsUpdate = true; // the key light moved -> re-bake the frozen shadow map once
+    clearTimeout(c.envBakeTimer);
+    c.envBakeTimer = setTimeout(() => bakeEnvironment(c, scene), 120);
+
+    return () => clearTimeout(c.envBakeTimer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeOfDay]);
 

@@ -18,7 +18,7 @@ import {
 } from 'three';
 
 import { MeshStandardNodeMaterial } from 'three/webgpu';
-import { attribute, cameraPosition, color, cross, dot, float, floor, Fn, fract, fwidth, mix, mod, modelWorldMatrixInverse, mx_fractal_noise_float, mx_noise_float, normalLocal, normalView, normalWorldGeometry, positionLocal, positionView, positionWorld, select, sin, smoothstep, step, uv, vec2, vec3, vec4 } from 'three/tsl';
+import { attribute, cameraPosition, color, cross, dot, float, floor, Fn, fract, fwidth, If, mix, mod, modelWorldMatrixInverse, mx_fractal_noise_float, mx_noise_float, normalLocal, normalView, normalWorldGeometry, positionLocal, positionView, positionWorld, select, sin, smoothstep, step, struct, uv, vec2, vec3, vec4 } from 'three/tsl';
 
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
@@ -1078,8 +1078,8 @@ const interior = /*@__PURE__*/ Fn( () => {
 	// --- nearest surface: the shell, then any furniture block that lies closer ----
 	// each block is a solid axis-aligned box in room space; boxHit returns its near
 	// face. consider() keeps whichever surface the ray meets first.
-	let bestT = t;
-	let bestCol = shellCol.mul( shellAO ).mul( falloffAt( hit.z ) );
+	const bestT = t.toVar();
+	const bestCol = shellCol.mul( shellAO ).mul( falloffAt( hit.z ) ).toVar();
 
 	const boxHit = ( bMin, bMax ) => {
 
@@ -1094,58 +1094,69 @@ const interior = /*@__PURE__*/ Fn( () => {
 
 	const consider = ( h, tN, c ) => {
 
-		const near = h.and( tN.lessThan( bestT ) ); bestCol = select( near, c, bestCol ); bestT = select( near, tN, bestT );
+		const isNear = h.and( tN.lessThan( bestT ) );
+		bestCol.assign( select( isNear, c, bestCol ) );
+		bestT.assign( select( isNear, tN, bestT ) );
 
 	};
 
-	const halfU = boxMax.x, floorY = boxMin.y, ceilY = boxMax.y, backZ = boxMax.z;
-	const midZ = setback.add( depth.mul( 0.5 ) ); // room centre, in depth
+	// the furniture ( six ray/box intersections per pixel ) only resolves when the camera
+	// is close enough for it to be more than sub-pixel. Distant windows — the great
+	// majority on screen — keep just the room shell, skipping the whole block. Mirrors the
+	// road material's distance LOD; the threshold is generous so the cutoff falls where the
+	// windows are already tiny and the furniture is invisible anyway.
+	If( positionWorld.distance( cameraPosition ).lessThan( 200 ), () => {
 
-	// a low table near the middle of the room ( its top catches the light )
-	const tCx = mix( float( - 0.6 ), float( 0.6 ), seed );
-	const tCz = midZ.add( mix( float( - 0.4 ), float( 0.5 ), seed2 ) );
-	const tbl = boxHit( vec3( tCx.sub( 0.6 ), floorY, tCz.sub( 0.35 ) ), vec3( tCx.add( 0.6 ), floorY.add( 0.42 ), tCz.add( 0.35 ) ) );
-	const tblCol = mix( color( 0x4a3526 ), color( 0x6b4a30 ), seed2 ).mul( select( tbl.qb.y.greaterThan( 0.94 ), float( 1.25 ), float( 0.8 ) ) );
-	consider( tbl.hit, tbl.tN, tblCol.mul( falloffAt( tbl.p.z ) ) );
+		const halfU = boxMax.x, floorY = boxMin.y, ceilY = boxMax.y, backZ = boxMax.z;
+		const midZ = setback.add( depth.mul( 0.5 ) ); // room centre, in depth
 
-	// a wide low sofa against the back wall, facing the window
-	const sofaCx = mix( halfU.mul( - 0.3 ), halfU.mul( 0.3 ), seed2 );
-	const sofa = boxHit( vec3( sofaCx.sub( 1.1 ), floorY, backZ.sub( 0.95 ) ), vec3( sofaCx.add( 1.1 ), floorY.add( mix( float( 0.8 ), float( 0.9 ), seed ) ), backZ.sub( 0.1 ) ) );
-	const sofaCol = mix( color( 0x5a4a3a ), color( 0x42566a ), seed ).mul( select( sofa.qb.y.greaterThan( 0.9 ), float( 1.12 ), float( 0.85 ) ) );
-	consider( sofa.hit, sofa.tN, sofaCol.mul( falloffAt( sofa.p.z ) ) );
+		// a low table near the middle of the room ( its top catches the light )
+		const tCx = mix( float( - 0.6 ), float( 0.6 ), seed );
+		const tCz = midZ.add( mix( float( - 0.4 ), float( 0.5 ), seed2 ) );
+		const tbl = boxHit( vec3( tCx.sub( 0.6 ), floorY, tCz.sub( 0.35 ) ), vec3( tCx.add( 0.6 ), floorY.add( 0.42 ), tCz.add( 0.35 ) ) );
+		const tblCol = mix( color( 0x4a3526 ), color( 0x6b4a30 ), seed2 ).mul( select( tbl.qb.y.greaterThan( 0.94 ), float( 1.25 ), float( 0.8 ) ) );
+		consider( tbl.hit, tbl.tN, tblCol.mul( falloffAt( tbl.p.z ) ) );
 
-	// tall wardrobes in the back corners — each side stands in some rooms
-	const wardrobe = ( cx, gate, h ) => {
+		// a wide low sofa against the back wall, facing the window
+		const sofaCx = mix( halfU.mul( - 0.3 ), halfU.mul( 0.3 ), seed2 );
+		const sofa = boxHit( vec3( sofaCx.sub( 1.1 ), floorY, backZ.sub( 0.95 ) ), vec3( sofaCx.add( 1.1 ), floorY.add( mix( float( 0.8 ), float( 0.9 ), seed ) ), backZ.sub( 0.1 ) ) );
+		const sofaCol = mix( color( 0x5a4a3a ), color( 0x42566a ), seed ).mul( select( sofa.qb.y.greaterThan( 0.9 ), float( 1.12 ), float( 0.85 ) ) );
+		consider( sofa.hit, sofa.tN, sofaCol.mul( falloffAt( sofa.p.z ) ) );
 
-		const w = boxHit( vec3( cx.sub( 0.5 ), floorY, backZ.sub( 0.7 ) ), vec3( cx.add( 0.5 ), floorY.add( h ), backZ.sub( 0.1 ) ) );
-		const c = mix( color( 0x3a2c22 ), color( 0x55473a ), seed ).mul( select( w.qb.y.greaterThan( 0.94 ), float( 1.2 ), float( 0.82 ) ) );
-		consider( w.hit.and( gate ), w.tN, c.mul( falloffAt( w.p.z ) ) );
+		// tall wardrobes in the back corners — each side stands in some rooms
+		const wardrobe = ( cx, gate, h ) => {
 
-	};
+			const w = boxHit( vec3( cx.sub( 0.5 ), floorY, backZ.sub( 0.7 ) ), vec3( cx.add( 0.5 ), floorY.add( h ), backZ.sub( 0.1 ) ) );
+			const c = mix( color( 0x3a2c22 ), color( 0x55473a ), seed ).mul( select( w.qb.y.greaterThan( 0.94 ), float( 1.2 ), float( 0.82 ) ) );
+			consider( w.hit.and( gate ), w.tN, c.mul( falloffAt( w.p.z ) ) );
 
-	wardrobe( halfU.mul( - 0.82 ), hash( 7.3, 2.1, 9.9 ).greaterThan( 0.4 ), mix( float( 1.7 ), float( 2.3 ), seed ) );
-	wardrobe( halfU.mul( 0.82 ), hash( 3.7, 8.4, 1.5 ).greaterThan( 0.4 ), mix( float( 1.7 ), float( 2.3 ), seed2 ) );
+		};
 
-	// curtains hung just inside the glass: drapes drawn part-way in from each side,
-	// so some windows read open and others half-covered
-	const fabric = mix( color( 0x8a7a64 ), color( 0x70605a ), seed2 );
-	const drape = ( bMin, bMax, gate ) => {
+		wardrobe( halfU.mul( - 0.82 ), hash( 7.3, 2.1, 9.9 ).greaterThan( 0.4 ), mix( float( 1.7 ), float( 2.3 ), seed ) );
+		wardrobe( halfU.mul( 0.82 ), hash( 3.7, 8.4, 1.5 ).greaterThan( 0.4 ), mix( float( 1.7 ), float( 2.3 ), seed2 ) );
 
-		const h = boxHit( bMin, bMax );
-		const pleat = fabric.mul( mix( float( 0.78 ), float( 1.12 ), fract( h.p.x.mul( 2.5 ) ) ) ); // soft vertical pleats
-		consider( h.hit.and( gate ), h.tN, pleat.mul( falloffAt( h.p.z ) ) );
+		// curtains hung just inside the glass: drapes drawn part-way in from each side,
+		// so some windows read open and others half-covered
+		const fabric = mix( color( 0x8a7a64 ), color( 0x70605a ), seed2 );
+		const drape = ( bMin, bMax, gate ) => {
 
-	};
+			const h = boxHit( bMin, bMax );
+			const pleat = fabric.mul( mix( float( 0.78 ), float( 1.12 ), fract( h.p.x.mul( 2.5 ) ) ) ); // soft vertical pleats
+			consider( h.hit.and( gate ), h.tN, pleat.mul( falloffAt( h.p.z ) ) );
 
-	const cz0 = setback, cz1 = setback.add( 0.12 );
-	// drape widths, biased narrow ( squared ) and each capped at half the room width, so
-	// the two sides only meet — fully curtaining the window — in the rare room where both
-	// are nearly closed; most rooms read partly open
-	const sL = smoothstep( 0.3, 1.0, seed ), sR = smoothstep( 0.3, 1.0, seed2 );
-	const lw = halfU.mul( sL.mul( sL ) ); // left drape width ( 0 below seed 0.3 )
-	const rw = halfU.mul( sR.mul( sR ) ); // right drape width
-	drape( vec3( halfU.negate(), floorY, cz0 ), vec3( halfU.negate().add( lw ), ceilY, cz1 ), lw.greaterThan( 0.05 ) );
-	drape( vec3( halfU.sub( rw ), floorY, cz0 ), vec3( halfU, ceilY, cz1 ), rw.greaterThan( 0.05 ) );
+		};
+
+		const cz0 = setback, cz1 = setback.add( 0.12 );
+		// drape widths, biased narrow ( squared ) and each capped at half the room width, so
+		// the two sides only meet — fully curtaining the window — in the rare room where both
+		// are nearly closed; most rooms read partly open
+		const sL = smoothstep( 0.3, 1.0, seed ), sR = smoothstep( 0.3, 1.0, seed2 );
+		const lw = halfU.mul( sL.mul( sL ) ); // left drape width ( 0 below seed 0.3 )
+		const rw = halfU.mul( sR.mul( sR ) ); // right drape width
+		drape( vec3( halfU.negate(), floorY, cz0 ), vec3( halfU.negate().add( lw ), ceilY, cz1 ), lw.greaterThan( 0.05 ) );
+		drape( vec3( halfU.sub( rw ), floorY, cz0 ), vec3( halfU, ceilY, cz1 ), rw.greaterThan( 0.05 ) );
+
+	} );
 
 	// lit rooms read brighter and warmer ( the lights are on )
 	const warmth = mix( vec3( 1.0, 1.0, 1.0 ), color( 0xffc081 ), lit.mul( 0.85 ) );
@@ -1167,14 +1178,13 @@ function createSkyscraperMaterial( buildingBase = color( 0xc6c0b2 ) ) {
 
 	const soot = color( 0x4a4236 );
 
-	// broad weathering, all driven from world position so it reads consistently
-	// across instanced and merged meshes: a slow tonal drift, a fine clay mottle,
-	// and sooty vertical streaks that pool low down
-
-	const tone = mx_fractal_noise_float( positionWorld.mul( 0.03 ), 2 ).mul( 0.18 );
-	const mottle = mx_noise_float( positionWorld.mul( 0.7 ) ).mul( 0.06 );
-	const streak = mx_fractal_noise_float( vec3( positionWorld.x.mul( 1.5 ), positionWorld.y.mul( 0.04 ), positionWorld.z.mul( 1.5 ) ), 2 );
-	const dirt = smoothstep( - 0.1, 0.45, streak ).mul( smoothstep( 210, 0, positionWorld.y ) ).mul( 0.6 );
+	// broad weathering ( a slow tonal drift, a fine clay mottle, and sooty vertical
+	// streaks that pool low down ) is driven from world position. It is the heaviest
+	// procedural noise on the facade, so — like the interior, glass and AC noise — it
+	// is NOT computed here; each is deferred into the per-partId branch that needs it
+	// ( see below ), so a glass pixel never pays for brick weathering and a wall pixel
+	// never pays for the interior raymarch. Only the cheap, derivative-bearing brick
+	// geometry ( joints, relief ) stays in this uniform control flow up front.
 
 	// procedural terracotta brickwork in running bond, keyed off the BUILDING-LOCAL position
 	// so the coursing anchors to each tower ( courses from its base, columns at its faces )
@@ -1225,89 +1235,147 @@ function createSkyscraperMaterial( buildingBase = color( 0xc6c0b2 ) ) {
 	const lodBevel = texel.mul( 1.5 ).max( bevel );
 	const brickFace = smoothstep( 0, lodBevel, distU.mul( brickL ) ).mul( smoothstep( 0, lodBevel, distV.mul( brickH ) ) ).mul( wallFacing );
 	const reliefHeight = brickFace.mul( 0.008 );
-	const rough = mx_noise_float( positionWorld.mul( 0.5 ) ).mul( 0.08 ).add( 0.82 ).add( joint.mul( 0.12 ) );
 
 	// the merged geometry carries a per-vertex partId; this material reads it and
-	// branches to reproduce each zone — no per-part materials, compute-raster friendly
+	// branches to reproduce each zone — no per-part materials, compute-raster friendly.
+	// partId is constant across each zone's triangles, so the branch is warp-coherent:
+	// unlike select() ( which evaluates BOTH sides ), a real If() actually skips the
+	// expensive path a pixel doesn't need — the interior raymarch on stone, the brick
+	// weathering on glass, the AC noise on everything else. All screen-space derivatives
+	// ( joint, reliefHeight, texel ) were taken above in uniform control flow, so the
+	// branches only read their results, never call fwidth / dFdx themselves.
 
 	const partId = attribute( 'partId', 'float' );
-	const isGlass = partId.equal( GLASS );
-	const isFrame = partId.equal( FRAME );
-	const isOrnament = partId.equal( ORNAMENT );
-	const isAC = partId.equal( AC );
 
-	// stone zones: brick + weathering on the building's colour, lightened for
-	// piers / ornament and darkened for window frames
-	const lighten = select( partId.equal( PIER ), float( 0.12 ), select( isOrnament, float( 0.2 ), float( 0 ) ) );
-	const perBrick = float( 1 ).add( tone ).add( mottle ).add( brickRnd.sub( 0.5 ).mul( 0.14 ) );
-	// per-brick warm/cool shift ( red up / blue down, or vice-versa ) so individual
-	// bricks read as slightly different fired tones, relative to the building's colour
-	const warmCool = brickRnd2.sub( 0.5 ).mul( 0.14 );
-	const brickShift = vec3( float( 1 ).add( warmCool ), float( 1 ), float( 1 ).sub( warmCool ) );
-	const tint = mix( buildingBase, color( 0xffffff ), lighten ).mul( perBrick ).mul( brickShift );
-	const masonry = mix( tint, tint.mul( 0.6 ), joint ); // recessed joints read darker
-	// roofs / ledges show every blotch ( flat & light ), so horizontal surfaces get a gentler,
-	// larger-scale grime instead of the wall's streaky soot — confined to those surfaces by a
-	// branch ( roofMask > 0 ), so the fractal never runs on the vertical facade
-	const roofMask = wallFacing.oneMinus();
-	const roofGrime = select( roofMask.greaterThan( 0 ), smoothstep( 0.0, 0.55, mx_fractal_noise_float( positionWorld.mul( 0.025 ), 3 ) ).mul( 0.22 ), float( 0 ) );
-	const stoneColor = mix( masonry, soot, mix( dirt, roofGrime, roofMask ) );
+	// the whole per-zone shade is one Fn returning a struct, so the warp-coherent
+	// partId branch is taken once and feeds every material node. ( If / toVar need a
+	// builder stack, which exists only inside an Fn — hence the wrapper; the cheap,
+	// derivative-bearing brick geometry above stays in the outer uniform control flow
+	// and is only *read* inside the branches. )
+	const Shaded = struct( { color: 'vec3', roughness: 'float', emissive: 'vec3', height: 'float' } );
 
-	// glass: the interior-mapped room is the base colour; the smooth, low-roughness
-	// surface still lets a faint sky reflection ride over it, and lit rooms glow ( emissive )
-	const room = interior();
+	const shade = Fn( () => {
 
-	// grimy glazing: the room shows through, but muted by a dusty film and dirt pooled
-	// along the bottom of each pane, plus a baseline haze, so the panes read as old
-	// glass rather than open holes. the streaks run down the facade ( world Y barely
-	// scaled ); the pooled dirt uses the pane's own UV ( y = 0 at the sill ).
-	const filmNoise = mx_fractal_noise_float( vec3( positionWorld.x.mul( 1.3 ), positionWorld.y.mul( 0.06 ), positionWorld.z.mul( 1.3 ) ), 2 );
-	const dustStreak = smoothstep( - 0.15, 0.5, filmNoise ).mul( 0.45 );
-	const pooled = smoothstep( 0.32, 0.0, uv().y ).mul( 0.4 );
-	const grime = float( 0.35 ).add( dustStreak ).add( pooled ).clamp( 0, 0.85 ); // baseline haze so it is never crystal-clear
-	const dirtyGlass = mix( color( 0x13161a ), color( 0x232b31 ), mx_noise_float( positionWorld.mul( 0.3 ) ).mul( 0.5 ).add( 0.5 ) );
-	const glassColor = mix( room.xyz.mul( color( 0xb6c6bf ) ), dirtyGlass, grime ); // faint green-grey ( soda-lime ) room tint, dirtied toward grimy glass
+		const isGlass = partId.equal( GLASS );
+		const isFrame = partId.equal( FRAME );
+		const isOrnament = partId.equal( ORNAMENT );
+		const isAC = partId.equal( AC );
+		const isPier = partId.equal( PIER );
 
-	// window frames are smooth dressed stone, not brick
-	const frameColor = buildingBase.mul( 0.55 );
+		const colorOut = vec3( 0 ).toVar();
+		const roughOut = float( 0.82 ).toVar();
+		const emissiveOut = vec3( 0 ).toVar();
+		const heightOut = float( 0 ).toVar(); // bump height; flat ( 0 ) unless a branch sets relief
 
-	// finials / ornament: smooth dressed stone ( lightened ), not brick
-	const ornamentColor = mix( buildingBase, color( 0xffffff ), 0.22 ).mul( float( 1 ).add( tone ) );
-	// window AC units: a louvered white-plastic box, grimier toward the base where it drips.
-	// keyed off the box's own UVs ( acUv.y runs 0 → 1 up each vented side )
-	const acUv = uv();
-	const acVent = smoothstep( 0.65, 0.4, normalWorldGeometry.y.abs() ); // 1 on the vertical vented sides, 0 on the flat top
-	const acDetail = smoothstep( 0.08, 0.015, texel ); // louvers fade out before a slat nears a pixel
-	const acLouver = acVent.mul( acDetail );
+		If( isGlass, () => {
 
-	// plastic shell: off-white, some units dingier / yellowed than others
-	const acDinge = mx_noise_float( positionWorld.mul( 0.4 ) ).mul( 0.5 ).add( 0.5 ); // ~per-unit
-	const acPaint = mix( color( 0xf2f1ec ), color( 0xcfccc2 ), acDinge ) // bright white → light dingy grey, both lighter than the wall
-		.add( mx_noise_float( positionWorld.mul( 5 ) ).mul( 0.04 ) );
+			// glass: the interior-mapped room is the base colour; the smooth, low-roughness
+			// surface still lets a faint sky reflection ride over it, and lit rooms glow.
+			const room = interior();
 
-	// a darker recessed grille panel inset into the lighter cabinet, with horizontal louvers
-	// inside it ( the front vents ) — the white plastic reads as a thin border frame
-	const acGrille = smoothstep( 0.06, 0.14, acUv.x ).mul( smoothstep( 0.94, 0.86, acUv.x ) )
-		.mul( smoothstep( 0.12, 0.2, acUv.y ) ).mul( smoothstep( 0.96, 0.88, acUv.y ) ).mul( acLouver );
-	const acSlats = fract( acUv.y.mul( 6 ) ); // bold louvers — reads at the unit's small on-screen size
-	const acFin = mix( float( 0.82 ), float( 1.04 ), acSlats );
-	const acBody = acPaint.mul( mix( float( 1 ), acFin.mul( 0.42 ), acGrille ) ); // cabinet stays light; recessed grille goes dark grey
+			// grimy glazing: the room shows through, muted by a dusty film and dirt pooled
+			// along the bottom of each pane, plus a baseline haze, so the panes read as old
+			// glass rather than open holes. the streaks run down the facade ( world Y barely
+			// scaled ); the pooled dirt uses the pane's own UV ( y = 0 at the sill ).
+			const filmNoise = mx_fractal_noise_float( vec3( positionWorld.x.mul( 1.3 ), positionWorld.y.mul( 0.06 ), positionWorld.z.mul( 1.3 ) ), 2 );
+			const dustStreak = smoothstep( - 0.15, 0.5, filmNoise ).mul( 0.45 );
+			const pooled = smoothstep( 0.32, 0.0, uv().y ).mul( 0.4 );
+			const grime = float( 0.35 ).add( dustStreak ).add( pooled ).clamp( 0, 0.85 ); // baseline haze so it is never crystal-clear
+			const dirtyGlass = mix( color( 0x13161a ), color( 0x232b31 ), mx_noise_float( positionWorld.mul( 0.3 ) ).mul( 0.5 ).add( 0.5 ) );
 
-	// grey-brown condensate grime streaking the lower edge ( plastic doesn't rust ); dirtier units streak more
-	const acStreak = mx_fractal_noise_float( vec3( positionWorld.x.mul( 6 ), positionWorld.y.mul( 0.5 ), positionWorld.z.mul( 6 ) ), 3 ).mul( 0.5 ).add( 0.5 );
-	const acGrime = smoothstep( 0.4, 0.0, acUv.y ).mul( acStreak ).mul( acDinge.add( 0.3 ) );
-	const acColor = mix( acBody, color( 0x6f685a ), acGrime.mul( 0.5 ) );
+			colorOut.assign( mix( room.xyz.mul( color( 0xb6c6bf ) ), dirtyGlass, grime ) ); // faint green-grey ( soda-lime ) room tint, dirtied toward grimy glass
+			roughOut.assign( float( 0.18 ) ); // glass kept smooth for a sky reflection, but soft enough not to alias over the interior
+			emissiveOut.assign( room.xyz.mul( room.w ).mul( 3.5 ).mul( grime.mul( 0.6 ).oneMinus() ) ); // lit rooms ( room.w = 1 ) glow, muted where the glass is grimiest
 
-	// recessed grille ( louver fins ) relief and a slightly rougher base
-	const acRelief = acGrille.mul( acSlats.mul( 0.012 ).sub( 0.01 ) );
-	const acRough = float( 0.52 ).add( acGrille.mul( 0.08 ) );
+		} ).ElseIf( isAC, () => {
+
+			// window AC units: a louvered white-plastic box, grimier toward the base where it drips.
+			// keyed off the box's own UVs ( acUv.y runs 0 → 1 up each vented side )
+			const acUv = uv();
+			const acVent = smoothstep( 0.65, 0.4, normalWorldGeometry.y.abs() ); // 1 on the vertical vented sides, 0 on the flat top
+			const acDetail = smoothstep( 0.08, 0.015, texel ); // louvers fade out before a slat nears a pixel
+			const acLouver = acVent.mul( acDetail );
+
+			// plastic shell: off-white, some units dingier / yellowed than others
+			const acDinge = mx_noise_float( positionWorld.mul( 0.4 ) ).mul( 0.5 ).add( 0.5 ); // ~per-unit
+			const acPaint = mix( color( 0xf2f1ec ), color( 0xcfccc2 ), acDinge ) // bright white → light dingy grey, both lighter than the wall
+				.add( mx_noise_float( positionWorld.mul( 5 ) ).mul( 0.04 ) );
+
+			// a darker recessed grille panel inset into the lighter cabinet, with horizontal louvers
+			// inside it ( the front vents ) — the white plastic reads as a thin border frame
+			const acGrille = smoothstep( 0.06, 0.14, acUv.x ).mul( smoothstep( 0.94, 0.86, acUv.x ) )
+				.mul( smoothstep( 0.12, 0.2, acUv.y ) ).mul( smoothstep( 0.96, 0.88, acUv.y ) ).mul( acLouver );
+			const acSlats = fract( acUv.y.mul( 6 ) ); // bold louvers — reads at the unit's small on-screen size
+			const acFin = mix( float( 0.82 ), float( 1.04 ), acSlats );
+			const acBody = acPaint.mul( mix( float( 1 ), acFin.mul( 0.42 ), acGrille ) ); // cabinet stays light; recessed grille goes dark grey
+
+			// grey-brown condensate grime streaking the lower edge ( plastic doesn't rust ); dirtier units streak more
+			const acStreak = mx_fractal_noise_float( vec3( positionWorld.x.mul( 6 ), positionWorld.y.mul( 0.5 ), positionWorld.z.mul( 6 ) ), 3 ).mul( 0.5 ).add( 0.5 );
+			const acGrime = smoothstep( 0.4, 0.0, acUv.y ).mul( acStreak ).mul( acDinge.add( 0.3 ) );
+
+			colorOut.assign( mix( acBody, color( 0x6f685a ), acGrime.mul( 0.5 ) ) );
+			roughOut.assign( float( 0.52 ).add( acGrille.mul( 0.08 ) ) );
+			heightOut.assign( acGrille.mul( acSlats.mul( 0.012 ).sub( 0.01 ) ) ); // recessed grille ( louver fins ) relief
+
+		} ).ElseIf( isFrame, () => {
+
+			// window frames are smooth dressed stone, not brick
+			colorOut.assign( buildingBase.mul( 0.55 ) );
+			roughOut.assign( mx_noise_float( positionWorld.mul( 0.5 ) ).mul( 0.08 ).add( 0.82 ).add( joint.mul( 0.12 ) ) );
+
+		} ).ElseIf( isOrnament, () => {
+
+			// finials / ornament: smooth dressed stone ( lightened ), not brick
+			const tone = mx_fractal_noise_float( positionWorld.mul( 0.03 ), 2 ).mul( 0.18 );
+			colorOut.assign( mix( buildingBase, color( 0xffffff ), 0.22 ).mul( float( 1 ).add( tone ) ) );
+			roughOut.assign( float( 0.8 ) );
+
+		} ).Else( () => {
+
+			// walls + piers: procedural terracotta brick + weathering on the building's
+			// colour, piers lightened a touch. this is where the broad weathering noise
+			// ( tonal drift, clay mottle, sooty streaks ) actually runs.
+			const tone = mx_fractal_noise_float( positionWorld.mul( 0.03 ), 2 ).mul( 0.18 );
+			const mottle = mx_noise_float( positionWorld.mul( 0.7 ) ).mul( 0.06 );
+			const streak = mx_fractal_noise_float( vec3( positionWorld.x.mul( 1.5 ), positionWorld.y.mul( 0.04 ), positionWorld.z.mul( 1.5 ) ), 2 );
+			const dirt = smoothstep( - 0.1, 0.45, streak ).mul( smoothstep( 210, 0, positionWorld.y ) ).mul( 0.6 );
+
+			const lighten = select( isPier, float( 0.12 ), float( 0 ) );
+			const perBrick = float( 1 ).add( tone ).add( mottle ).add( brickRnd.sub( 0.5 ).mul( 0.14 ) );
+			// per-brick warm/cool shift ( red up / blue down, or vice-versa ) so individual
+			// bricks read as slightly different fired tones, relative to the building's colour
+			const warmCool = brickRnd2.sub( 0.5 ).mul( 0.14 );
+			const brickShift = vec3( float( 1 ).add( warmCool ), float( 1 ), float( 1 ).sub( warmCool ) );
+			const tint = mix( buildingBase, color( 0xffffff ), lighten ).mul( perBrick ).mul( brickShift );
+			const masonry = mix( tint, tint.mul( 0.6 ), joint ); // recessed joints read darker
+
+			// roofs / ledges show every blotch ( flat & light ), so horizontal surfaces get a
+			// gentler, larger-scale grime instead of the wall's streaky soot — confined to those
+			// surfaces by an If ( roofMask > 0 ), so the fractal never runs on the vertical facade
+			const roofMask = wallFacing.oneMinus();
+			const roofGrime = float( 0 ).toVar();
+			If( roofMask.greaterThan( 0 ), () => {
+
+				roofGrime.assign( smoothstep( 0.0, 0.55, mx_fractal_noise_float( positionWorld.mul( 0.025 ), 3 ) ).mul( 0.22 ) );
+
+			} );
+
+			colorOut.assign( mix( masonry, soot, mix( dirt, roofGrime, roofMask ) ) );
+			roughOut.assign( mx_noise_float( positionWorld.mul( 0.5 ) ).mul( 0.08 ).add( 0.82 ).add( joint.mul( 0.12 ) ) );
+			heightOut.assign( reliefHeight );
+
+		} );
+
+		return Shaded( colorOut, roughOut, emissiveOut, heightOut );
+
+	} )();
 
 	const material = new MeshStandardNodeMaterial();
-	material.colorNode = select( isGlass, glassColor, select( isFrame, frameColor, select( isOrnament, ornamentColor, select( isAC, acColor, stoneColor ) ) ) );
-	material.roughnessNode = select( isGlass, float( 0.18 ), select( isOrnament, float( 0.8 ), select( isAC, acRough, rough ) ) ); // glass kept smooth for a sky reflection, but soft enough not to alias over the interior
+	material.colorNode = shade.get( 'color' );
+	material.roughnessNode = shade.get( 'roughness' );
 	material.metalnessNode = float( 0 ); // all dielectric — stone, glass and the plastic AC shells
-	material.emissiveNode = select( isGlass, room.xyz.mul( room.w ).mul( 3.5 ).mul( grime.mul( 0.6 ).oneMinus() ), color( 0x000000 ) ); // lit rooms ( room.w = 1 ) glow, muted where the glass is grimiest
-	material.normalNode = bumpNormal( select( isGlass.or( isFrame ).or( isOrnament ), float( 0 ), select( isAC, acRelief, reliefHeight ) ) ); // glass / frames / ornament stay flat; AC has its own louvers
+	material.emissiveNode = shade.get( 'emissive' );
+	material.normalNode = bumpNormal( shade.get( 'height' ) ); // glass / frames / ornament stay flat ( height 0 )
 
 	return material;
 
