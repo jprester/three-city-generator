@@ -8,8 +8,15 @@ const VIEWS = {
   interior: { label: 'Interior Window Lab', Component: InteriorLab },
 };
 
+// allow ?view=interior to deep-link a view (used by the screenshot script)
+function initialView() {
+  if (typeof window === 'undefined') return 'city';
+  const v = new URLSearchParams(window.location.search).get('view');
+  return v && VIEWS[v] ? v : 'city';
+}
+
 export default function App() {
-  const [view, setView] = useState('city');
+  const [view, setView] = useState(initialView);
   const Active = VIEWS[view].Component;
 
   return (

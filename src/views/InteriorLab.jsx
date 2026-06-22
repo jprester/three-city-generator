@@ -1,9 +1,11 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { OrbitControls } from '@react-three/drei';
 import { useControls, button, Leva } from 'leva';
 import * as THREE from 'three/webgpu';
 
 import WebGPUCanvas from '../webgpu/WebGPUCanvas.jsx';
+import ProceduralSky from '../webgpu/ProceduralSky.jsx';
+import { skyForTime } from '../interior/dayNight.js';
 import {
   createInteriorUniforms,
   createInteriorWindowMaterial,
@@ -14,6 +16,7 @@ import {
 const FACADE_W = 12;
 const FACADE_H = 14;
 const FACADE_CY = 7; // lift it off the ground
+const SUN_DISTANCE = 60;
 
 function Facade({ uniforms }) {
   // Build the geometry + material once; the sliders drive uniforms, not rebuilds.
@@ -35,8 +38,10 @@ export default function InteriorLab() {
   // one stable set of uniform nodes for the lifetime of the view
   const uniforms = useRef(createInteriorUniforms()).current;
 
-  // Leva sliders -> write straight into the uniform .value (live, no recompile)
-  useControls('Interior Window Lab', {
+  // Leva sliders -> write straight into the uniform .value (live, no recompile).
+  // timeOfDay is captured from the return value (it drives React-rendered sky/sun).
+  const { timeOfDay } = useControls('Interior Window Lab', {
+    timeOfDay: { value: 18.5, min: 0, max: 24, step: 0.1, label: 'time of day' },
     interiorOn: {
       value: true,
       label: 'interior mapping',
@@ -82,14 +87,6 @@ export default function InteriorLab() {
       label: 'room depth',
       onChange: (v) => (uniforms.roomDepth.value = v),
     },
-    litFraction: {
-      value: 0.25,
-      min: 0,
-      max: 1,
-      step: 0.05,
-      label: 'lit rooms',
-      onChange: (v) => (uniforms.litFraction.value = v),
-    },
     ao: {
       value: 1,
       min: 0,
@@ -109,6 +106,14 @@ export default function InteriorLab() {
     reseed: button(() => (uniforms.seed.value += 17.3)),
   });
 
+  // everything the sky/sun needs for this time of day
+  const sky = useMemo(() => skyForTime(timeOfDay), [timeOfDay]);
+
+  // the fraction of lit rooms is driven by the clock (lots at night, few by day)
+  useEffect(() => {
+    uniforms.litFraction.value = sky.litFraction;
+  }, [sky, uniforms]);
+
   return (
     <>
       <Leva collapsed={false} />
@@ -119,20 +124,31 @@ export default function InteriorLab() {
         </div>
         <small>
           One flat plane. Every &ldquo;room&rdquo; — walls, floor, furniture,
-          lit lamps — is raymarched per-pixel in a TSL shader, no geometry or
-          textures. Orbit to see the parallax; toggle{' '}
+          lit lamps — is raymarched per-pixel in a TSL shader, with a fully
+          procedural sky reflected in the glass (no textures, no HDRI). Drag{' '}
+          <em>time of day</em> from noon to night, orbit for parallax, and toggle{' '}
           <em>interior mapping</em> to compare against flat glass.
         </small>
       </div>
 
       <WebGPUCanvas
-        exposure={0.6}
+        exposure={0.7}
         camera={{ fov: 45, near: 0.1, far: 2000, position: [9, 7, 15] }}
       >
-        {/* a dim key light so the stone frame and glass specular read */}
-        <hemisphereLight args={[0x99aacc, 0x202028, 1.2]} />
-        <directionalLight position={[6, 12, 8]} intensity={1.4} />
-        <color attach="background" args={[0x0b0e14]} />
+        {/* procedural gradient sky: visible backdrop AND the IBL the glass reflects */}
+        <ProceduralSky top={sky.top} horizon={sky.horizon} bottom={sky.bottom} />
+
+        {/* sun + a little ambient, both driven by the clock */}
+        <ambientLight intensity={sky.ambient} />
+        <directionalLight
+          position={[
+            sky.sunDir[0] * SUN_DISTANCE,
+            sky.sunDir[1] * SUN_DISTANCE,
+            sky.sunDir[2] * SUN_DISTANCE,
+          ]}
+          intensity={sky.sunIntensity}
+          color={sky.sunColor}
+        />
 
         <Facade uniforms={uniforms} />
 

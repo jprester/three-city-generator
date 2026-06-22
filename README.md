@@ -34,12 +34,14 @@ A standalone, heavily-commented demo of the **interior-mapping** technique that
 makes the skyscraper windows look into furnished rooms — using a *single flat
 plane* and no geometry or textures. Every room (walls, floor, ceiling, table,
 sofa, wardrobes, curtains, lit lamps, fake corner AO) is raymarched per-pixel in
-a TSL shader. Live sliders let you experiment:
+a TSL shader, lit by a fully procedural gradient sky that's reflected in the
+glass (no HDRI). Live sliders let you experiment:
 
+- `time of day` — drag from noon to midnight: the procedural sky recolours, the
+  sun moves, and more rooms light up after dark (fewer by day)
 - `interior mapping` — toggle to compare the effect against flat dark glass
 - `window width/height`, `frame width`, `glazing bar` — the window grid
 - `room depth` — how deep the illusory rooms recede
-- `lit rooms` — fraction of rooms with the lights on (they emit/glow)
 - `corner AO`, `furniture`, `curtains`, and a `reseed` button
 
 The technique lives in [`src/interior/interiorMapping.js`](src/interior/interiorMapping.js).
@@ -82,3 +84,31 @@ environment baking, key light, ground, city) but hosts it inside R3F:
 
 The reference copy of the original example files is kept under `_ref/` for
 comparison (excluded from Vite's dependency scan).
+
+## Procedural extensions (beyond upstream)
+
+Additions on top of the upstream port, all fully procedural (no assets),
+demonstrating how far the code-only approach scales:
+
+1. **Procedural sky + IBL for the lab** — `src/webgpu/ProceduralSky.jsx`. A large
+   inverted sphere with a vertical TSL gradient serves as both the visible
+   backdrop and the image-based lighting (baked into an env map with
+   `PMREMGenerator`), so glass shows real reflections — no HDRI file.
+2. **Day/night** — `src/interior/dayNight.js`. A pure function maps the lab's
+   `time of day` to sky colours, sun direction/intensity, and the fraction of lit
+   rooms (many at night, few by day).
+
+## Screenshots
+
+`scripts/shot.mjs` drives the **system Google Chrome** (via `puppeteer-core`, no
+Chromium download) with WebGPU enabled, loads each view, waits for it to render,
+and writes a PNG to `screenshots/`:
+
+```bash
+npm run dev     # in one terminal
+npm run shot    # in another  → screenshots/city.png, screenshots/interior.png
+```
+
+Env vars: `VIEWS=city,interior`, `HEADLESS=0` (headful, most reliable for
+WebGPU), `WAIT_MS=4000`, `BASE_URL=http://localhost:5173`. Headless WebGPU works
+on macOS via the bundled flags (`--enable-unsafe-webgpu --use-angle=metal`).
