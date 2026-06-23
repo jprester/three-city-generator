@@ -3,6 +3,7 @@ import { Leva } from 'leva';
 
 import WebGPUCanvas from '../webgpu/WebGPUCanvas.jsx';
 import Scene from '../Scene.jsx';
+import CityBloom from '../webgpu/CityBloom.jsx';
 
 export default function CityView() {
   return (
@@ -28,6 +29,7 @@ export default function CityView() {
         camera={{ fov: 55, near: 1, far: 20000, position: [-55, 60, -100] }}
       >
         <Scene />
+        <CityBloom />
 
         <OrbitControls
           makeDefault

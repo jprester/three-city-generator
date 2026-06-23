@@ -18,7 +18,10 @@ import {
   CityGenerator,
   createRoadMaterial,
 } from './generators/CityGenerator.js';
-import { createSkyscraperMaterial } from './generators/city/SkyscraperGenerator.js';
+import {
+  createSkyscraperMaterial,
+  skyscraperLights,
+} from './generators/city/SkyscraperGenerator.js';
 
 // NYC palette, hashed per lot in the city grid so a single shared material
 // dresses the whole skyline — only the picked flat colour differs per tower.
@@ -105,6 +108,22 @@ export default function Scene() {
   const { seed, timeOfDay } = useControls('City', {
     seed: { value: 1, min: 0, max: 100, step: 1 },
     timeOfDay: { value: 6.4, min: 6, max: 18, step: 0.1, label: 'time of day' },
+    litRooms: {
+      value: 0.2,
+      min: 0,
+      max: 1,
+      step: 0.01,
+      label: 'lit rooms',
+      onChange: (v) => (skyscraperLights.litFraction.value = v),
+    },
+    windowGlow: {
+      value: 4,
+      min: 0,
+      max: 12,
+      step: 0.1,
+      label: 'window glow',
+      onChange: (v) => (skyscraperLights.emissiveIntensity.value = v),
+    },
   });
 
   // --- one-time setup: persistent objects (sky, env, ground, key light) ----
