@@ -18,9 +18,10 @@ export default function CityView() {
           <span> — City Generator</span>
         </div>
         <small>
-          Procedurally generated blocks of Neo-Gothic terracotta skyscrapers at
-          sunset. Geometry and every surface are generated in code — no external
-          assets.
+          Procedurally generated blocks of Neo-Gothic terracotta skyscrapers.
+          Geometry and every surface are generated in code — no external assets.
+          Drag <em>time of day</em> from midday to midnight; after dark the windows
+          light up — tune <em>lit rooms</em>, <em>window glow</em> and <em>bloom</em>.
         </small>
       </div>
 

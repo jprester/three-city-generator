@@ -66,10 +66,14 @@ function buildBuildingMaterial(layout, seed) {
 // Cheap (no GPU work) so it can run live on every slider tick. Mirrors the sun
 // half of updateSun() in the example; the IBL re-bake is split out below.
 function updateSun(ctx, timeOfDay) {
-  const { sky, sun, sunLight } = ctx;
+  const { sky, sun, sunLight, moonLight } = ctx;
 
-  const u = (timeOfDay - 12) / 6; // -1 sunrise, 0 noon, +1 sunset
-  const elevation = Math.max(0, 1 - u * u) * 72; // degrees, peaks at noon
+  // sine arc over a full 24h clock: the sun rises at 6, peaks at noon, sets at 18 and
+  // drops BELOW the horizon through the night (negative elevation), so the sky darkens
+  // to a real night instead of holding at the horizon. Mirrors dayNight.js's model.
+  const s = Math.sin(((timeOfDay - 6) / 12) * Math.PI); // -1 midnight .. +1 noon
+  const elevation = s * 72; // degrees; negative when the sun is below the horizon
+  const u = (timeOfDay - 12) / 6;
   const azimuth = 90 - u * 55; // sun swings east -> west
 
   sun.setFromSphericalCoords(
@@ -84,6 +88,10 @@ function updateSun(ctx, timeOfDay) {
   sunLight.color.set(0xffb072).lerp(new THREE.Color(0xfff4e8), transmittance);
   sunLight.intensity = 6 * transmittance;
   sunLight.position.copy(sun).multiplyScalar(600);
+
+  // fade the cool fill in as the sun drops below the horizon (s < 0), so it lifts the
+  // night silhouettes but is fully off during the day (when the sky env does the fill)
+  if (moonLight) moonLight.intensity = Math.max(0, -s) * 0.5;
 }
 
 // Re-bake the sky (without the sun disc) into the IBL environment map. This is a
@@ -107,9 +115,9 @@ export default function Scene() {
 
   const { seed, timeOfDay } = useControls('City', {
     seed: { value: 1, min: 0, max: 100, step: 1 },
-    timeOfDay: { value: 6.4, min: 6, max: 18, step: 0.1, label: 'time of day' },
+    timeOfDay: { value: 20, min: 0, max: 24, step: 0.1, label: 'time of day' },
     litRooms: {
-      value: 0.2,
+      value: 0.3,
       min: 0,
       max: 1,
       step: 0.01,
@@ -117,7 +125,7 @@ export default function Scene() {
       onChange: (v) => (skyscraperLights.litFraction.value = v),
     },
     windowGlow: {
-      value: 4,
+      value: 5,
       min: 0,
       max: 12,
       step: 0.1,
@@ -173,6 +181,12 @@ export default function Scene() {
     sunLight.shadow.bias = -0.0004;
     scene.add(sunLight);
 
+    // a faint cool hemisphere fill, ramped up only after dark by updateSun(): once the
+    // sun is down and the (now dark) sky env gives almost no fill, this keeps the
+    // building masses reading as silhouettes instead of vanishing into pure black.
+    const moonLight = new THREE.HemisphereLight(0x3a4a63, 0x05060a, 0);
+    scene.add(moonLight);
+
     // one shared building material, built once (seed baked in, as in the example)
     const material = buildBuildingMaterial(city.layout, 1);
 
@@ -184,6 +198,7 @@ export default function Scene() {
       city,
       ground,
       sunLight,
+      moonLight,
       material,
       cityGroup: null,
     };
@@ -200,6 +215,7 @@ export default function Scene() {
       c.ground.geometry.dispose();
       c.ground.material.dispose();
       scene.remove(c.sunLight);
+      scene.remove(c.moonLight);
       scene.remove(c.sky);
       if (scene.environment) {
         scene.environment.dispose();

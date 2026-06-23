@@ -997,8 +997,8 @@ function bumpNormal( height ) {
 //   litFraction      — fraction of rooms with the lights on ( 0.2 ≈ the original ~20% )
 //   emissiveIntensity — how hard a lit window glows ( pairs with the bloom pass )
 const skyscraperLights = {
-	litFraction: /*@__PURE__*/ uniform( 0.2 ),
-	emissiveIntensity: /*@__PURE__*/ uniform( 4 )
+	litFraction: /*@__PURE__*/ uniform( 0.3 ),
+	emissiveIntensity: /*@__PURE__*/ uniform( 5 )
 };
 
 const interior = /*@__PURE__*/ Fn( () => {

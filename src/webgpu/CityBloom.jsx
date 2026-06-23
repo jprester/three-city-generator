@@ -40,7 +40,7 @@ export default function CityBloom() {
       onChange: (v) => (gl.toneMappingExposure = v),
     },
     bloom: {
-      value: 0.1,
+      value: 0.25,
       min: 0,
       max: 2,
       step: 0.01,
