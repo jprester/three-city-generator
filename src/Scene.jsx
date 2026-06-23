@@ -66,7 +66,8 @@ function buildBuildingMaterial(layout, seed) {
 // Cheap (no GPU work) so it can run live on every slider tick. Mirrors the sun
 // half of updateSun() in the example; the IBL re-bake is split out below.
 function updateSun(ctx, timeOfDay) {
-  const { sky, sun, sunLight, moonLight } = ctx;
+  const { sky, sun, sunLight, moonLight, moonDir, nightAmbient } = ctx;
+  ctx.timeOfDay = timeOfDay; // remembered so the night-fill slider can re-apply live
 
   // sine arc over a full 24h clock: the sun rises at 6, peaks at noon, sets at 18 and
   // drops BELOW the horizon through the night (negative elevation), so the sky darkens
@@ -89,9 +90,17 @@ function updateSun(ctx, timeOfDay) {
   sunLight.intensity = 6 * transmittance;
   sunLight.position.copy(sun).multiplyScalar(600);
 
-  // fade the cool fill in as the sun drops below the horizon (s < 0), so it lifts the
-  // night silhouettes but is fully off during the day (when the sky env does the fill)
-  if (moonLight) moonLight.intensity = Math.max(0, -s) * 0.5;
+  // night lighting: a layered rig that fades in through dusk (from when the sun nears
+  // the horizon to full dark) and is fully off in daylight, when the bright sky env does
+  // the fill. `night` ramps 0 -> 1 across dusk; `nightFill` is the user's slider.
+  //  - moonLight  : hemisphere — cool moon from above, warm city/ground glow from below
+  //  - moonDir    : a soft cool key from high up, for form/highlights on the facades
+  //  - nightAmbient: a low floor so shadowed masses never read as pure black
+  const night = 1 - THREE.MathUtils.smoothstep(s, -0.1, 0.35); // 0 day .. 1 night
+  const fill = night * (ctx.nightFill ?? 1);
+  if (moonLight) moonLight.intensity = fill * 0.55;
+  if (moonDir) moonDir.intensity = fill * 0.5;
+  if (nightAmbient) nightAmbient.intensity = fill * 0.18;
 }
 
 // Re-bake the sky (without the sun disc) into the IBL environment map. This is a
@@ -131,6 +140,19 @@ export default function Scene() {
       step: 0.1,
       label: 'window glow',
       onChange: (v) => (skyscraperLights.emissiveIntensity.value = v),
+    },
+    nightFill: {
+      value: 0.6,
+      min: 0,
+      max: 2,
+      step: 0.05,
+      label: 'night fill',
+      onChange: (v) => {
+        const c = ctx.current;
+        if (!c) return;
+        c.nightFill = v;
+        updateSun(c, c.timeOfDay); // re-apply the moon / ground glow / ambient at the current time
+      },
     },
   });
 
@@ -181,11 +203,20 @@ export default function Scene() {
     sunLight.shadow.bias = -0.0004;
     scene.add(sunLight);
 
-    // a faint cool hemisphere fill, ramped up only after dark by updateSun(): once the
-    // sun is down and the (now dark) sky env gives almost no fill, this keeps the
-    // building masses reading as silhouettes instead of vanishing into pure black.
-    const moonLight = new THREE.HemisphereLight(0x3a4a63, 0x05060a, 0);
+    // night light rig — all faded in by updateSun() through dusk and off in daylight.
+    // a hemisphere doing double duty: cool moonlight from the sky, warm sodium / neon
+    // city-glow bouncing up from the streets below.
+    const moonLight = new THREE.HemisphereLight(0x4a5a78, 0x5a3a1e, 0);
     scene.add(moonLight);
+
+    // a soft cool directional "moon" from high up, for some form on the facades
+    const moonDir = new THREE.DirectionalLight(0xb4c4dc, 0);
+    moonDir.position.set(-200, 320, 160);
+    scene.add(moonDir);
+
+    // a low ambient floor so deep-shadow masses never go fully black at night
+    const nightAmbient = new THREE.AmbientLight(0x222a3a, 0);
+    scene.add(nightAmbient);
 
     // one shared building material, built once (seed baked in, as in the example)
     const material = buildBuildingMaterial(city.layout, 1);
@@ -199,6 +230,10 @@ export default function Scene() {
       ground,
       sunLight,
       moonLight,
+      moonDir,
+      nightAmbient,
+      nightFill: 0.6,
+      timeOfDay: 20,
       material,
       cityGroup: null,
     };
@@ -216,6 +251,8 @@ export default function Scene() {
       c.ground.material.dispose();
       scene.remove(c.sunLight);
       scene.remove(c.moonLight);
+      scene.remove(c.moonDir);
+      scene.remove(c.nightAmbient);
       scene.remove(c.sky);
       if (scene.environment) {
         scene.environment.dispose();
