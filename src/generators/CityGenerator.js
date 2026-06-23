@@ -82,9 +82,11 @@ class CityGenerator {
 						const onCorner = cornerX !== 0 && cornerZ !== 0;
 
 						const tall = random();
+						const isGlass = random() < ( this.parameters.glassMix ?? 0 );
 
-						const generator = new SkyscraperGenerator( {
+						const params = {
 							seed: Math.floor( random() * 100000 ),
+							style: isGlass ? 'glass' : 'gothic',
 							totalHeight: 38 + tall * tall * 114, // a few tall towers, mostly mid-rise
 							footprint: { width: L.lot - 4 - random() * 8, depth: L.lot - 4 - random() * 8 }, // rectangular: width and depth vary independently
 							floorHeight: 3.6 + random() * 1.2,
@@ -96,7 +98,22 @@ class CityGenerator {
 							chamferCornerZ: cornerZ,
 							setbackDepth: 0.8 + random() * 2,
 							stringCourseEvery: random() < 0.85 ? 3 + Math.floor( random() * 6 ) : 0
-						}, materials.building );
+						};
+
+						// modern curtain-wall proportions: wider window modules, slim mullions and
+						// flush, near floor-to-ceiling glazing on a simpler, shallower-setback mass
+						if ( isGlass ) {
+
+							params.bayWidth = 2.8 + random() * 1.6;
+							params.pierWidth = 0.2 + random() * 0.2;
+							params.pierDepth = 0.12 + random() * 0.12;
+							params.windowReveal = 0.03 + random() * 0.04;
+							params.setbackDepth = 0.3 + random() * 0.9;
+
+						}
+
+						const material = isGlass ? ( materials.glass ?? materials.building ) : materials.building;
+						const generator = new SkyscraperGenerator( params, material );
 
 						const building = generator.build();
 						building.position.set( blockX + ( lx + 0.5 ) * L.lot, curb, blockZ + ( lz + 0.5 ) * L.lot );
@@ -143,7 +160,8 @@ CityGenerator.defaults = {
 	blocksX: 2,
 	blocksZ: 2,
 	curbHeight: 0.15, // ~6 in standard curb reveal / sidewalk height above the road
-	curbRadius: 5
+	curbRadius: 5,
+	glassMix: 0 // fraction of lots built as modern glass curtain-wall towers ( 0 = all gothic )
 };
 
 // derives the block / street dimensions from the parameters

@@ -273,12 +273,17 @@ class SkyscraperGenerator {
 
 		const p = Object.assign( {}, SkyscraperGenerator.defaults, randomStyle( random ), this.parameters );
 
+		// the building "type": which authored features it emits ( arcade, finials,
+		// cornices ) and how tall its glazing runs. drives the massing; the surface is
+		// chosen by the caller's material ( terracotta vs. curtain wall )
+		const style = SkyscraperGenerator.styles[ this.parameters.style ] ?? SkyscraperGenerator.styles.gothic;
+
 		// snap the masonry-driving dimensions to the brick module so the procedural
 		// brickwork ( courses up local Y, columns along each face ) lines up with the
 		// geometry: a whole number of courses per floor and bricks per bay
 		const vModule = BRICK.height * 2; // a course pair, so floor / window halves still land on a joint
 		p.floorHeight = Math.max( vModule * 3, Math.round( p.floorHeight / vModule ) * vModule );
-		p.windowHeight = Math.round( p.floorHeight * WINDOW_HEIGHT_RATIO / vModule ) * vModule;
+		p.windowHeight = Math.round( p.floorHeight * style.windowHeightRatio / vModule ) * vModule;
 		p.bayWidth = Math.max( BRICK.length * 3, Math.round( p.bayWidth / BRICK.length ) * BRICK.length );
 		p.pierWidth = Math.max( BRICK.length, Math.round( p.pierWidth / BRICK.length ) * BRICK.length );
 
@@ -335,11 +340,15 @@ class SkyscraperGenerator {
 
 		// --- shell ----------------------------------------------------------
 
-		// the base is an open arcade (added below); above it a thin backing wall
-		// closes the volume behind the glass, with the facade grid (piers +
-		// spandrel bands) built in front of it
+		// a thin backing wall closes the volume behind the glass, with the facade grid
+		// ( piers + spandrel bands ) built in front of it. the gothic style opens its
+		// base as an arcade ( added below ), so its facade backing starts at baseTop;
+		// the glass style runs the curtain wall all the way down to the ground.
 
-		for ( const frame of faces ) addWall( boxes, frame, baseTop, shaftTop, 0.8, - 0.6 );
+		const facadeBottom = style.arcade ? baseTop : 0;
+		const facadeHeight = shaftTop - facadeBottom;
+
+		for ( const frame of faces ) addWall( boxes, frame, facadeBottom, shaftTop, 0.8, - 0.6 );
 		for ( const frame of crownFaces ) addWall( boxes, frame, shaftTop, p.totalHeight, 0.8, - 0.6 );
 
 		// setback ledge: a thin slab capping the shaft footprint where the
@@ -348,35 +357,39 @@ class SkyscraperGenerator {
 		extras.push( slab( footprint, shaftTop, 0.6 ) );
 		extras.push( slab( crownFootprint, p.totalHeight, 0.6 ) );
 
-		// --- base: a gothic arcade with deep pointed openings ---------------
+		// --- base: a gothic arcade with deep pointed openings ( gothic only ) ----
 
-		for ( const frame of faces ) {
+		if ( style.arcade ) {
 
-			addArcade( extras, frame, baseHeight, p );
-			addCornice( boxes, frame, baseTop - p.stringCourseHeight, p.stringCourseHeight, 0.5 );
+			for ( const frame of faces ) {
 
-		}
+				addArcade( extras, frame, baseHeight, p );
+				addCornice( boxes, frame, baseTop - p.stringCourseHeight, p.stringCourseHeight, 0.5 );
 
-		// --- shaft: continuous piers, stacked windows, periodic bands -------
-
-		for ( const frame of faces ) {
-
-			addSpandrelBands( boxes, frame, baseTop, shaftHeight, p );
-			addPiers( frame, baseTop, shaftHeight, p, addPier );
-			addWindows( frame, windows, glass, glassRooms, acUnits, baseTop, shaftHeight, p );
+			}
 
 		}
 
-		if ( p.stringCourseEvery > 0 ) {
+		// --- shaft ( + base, for the glass style ): piers, windows, bands -------
 
-			const floors = Math.max( 1, Math.round( shaftHeight / p.floorHeight ) );
-			const fh = shaftHeight / floors;
+		for ( const frame of faces ) {
+
+			addSpandrelBands( boxes, frame, facadeBottom, facadeHeight, p );
+			addPiers( frame, facadeBottom, facadeHeight, p, addPier );
+			addWindows( frame, windows, glass, glassRooms, style.ac ? acUnits : null, facadeBottom, facadeHeight, p );
+
+		}
+
+		if ( style.cornices && p.stringCourseEvery > 0 ) {
+
+			const floors = Math.max( 1, Math.round( facadeHeight / p.floorHeight ) );
+			const fh = facadeHeight / floors;
 
 			for ( let f = p.stringCourseEvery; f < floors; f += p.stringCourseEvery ) {
 
 				for ( const frame of faces ) {
 
-					addCornice( boxes, frame, baseTop + f * fh - p.stringCourseHeight * 0.5, p.stringCourseHeight, 0.3 );
+					addCornice( boxes, frame, facadeBottom + f * fh - p.stringCourseHeight * 0.5, p.stringCourseHeight, 0.3 );
 
 				}
 
@@ -384,18 +397,18 @@ class SkyscraperGenerator {
 
 		}
 
-		// --- crown: shorter floors, heavy cornice, parapet, finials ---------
+		// --- crown: parapet always; a heavy cornice and finials for gothic ------
 
-		const crownCornice = p.stringCourseHeight * 1.6;
+		const crownCornice = style.cornices ? p.stringCourseHeight * 1.6 : 0;
 
 		for ( const frame of crownFaces ) {
 
 			addSpandrelBands( boxes, frame, shaftTop, crownHeight, p );
 			addPiers( frame, shaftTop, crownHeight - crownCornice, p, addPier ); // piers terminate at the cornice, not through it
 			addWindows( frame, windows, glass, glassRooms, null, shaftTop, crownHeight, p );
-			addCornice( boxes, frame, p.totalHeight - crownCornice, crownCornice, 0.9 );
+			if ( style.cornices ) addCornice( boxes, frame, p.totalHeight - crownCornice, crownCornice, 0.9 );
 			addParapet( boxes, frame, p.totalHeight, p );
-			addFinials( frame, finials, shaftTop, crownHeight, p );
+			if ( style.finials ) addFinials( frame, finials, shaftTop, crownHeight, p );
 
 		}
 
@@ -463,7 +476,18 @@ SkyscraperGenerator.defaults = {
 	chamferCornerX: 1,
 	chamferCornerZ: 1,
 	setbackDepth: 1.5,
-	acChance: 0.12
+	acChance: 0.12,
+	style: 'gothic'
+};
+
+// the building "type" presets: each selects which authored features the massing
+// emits and how tall the glazing runs. `gothic` is the original tripartite
+// terracotta tower; `glass` is a flat modern curtain-wall office block ( no arcade,
+// finials, cornices or AC units, with near floor-to-ceiling glazing ). The surface
+// look is paired with these by the caller's material — see createGlassTowerMaterial.
+SkyscraperGenerator.styles = {
+	gothic: { windowHeightRatio: WINDOW_HEIGHT_RATIO, arcade: true, finials: true, cornices: true, ac: true },
+	glass: { windowHeightRatio: 0.92, arcade: false, finials: false, cornices: false, ac: false }
 };
 
 // --- footprint & faces ---------------------------------------------------
@@ -1381,4 +1405,85 @@ function createSkyscraperMaterial( buildingBase = color( 0xc6c0b2 ) ) {
 
 }
 
-export { SkyscraperGenerator, createSkyscraperMaterial };
+/**
+ * A modern curtain-wall variant of the facade material. It reads the same baked
+ * per-vertex `partId` zones but dresses them as a glass office tower: reflective
+ * low-roughness vision glass ( the interior mapping still reads through it ), slim
+ * aluminium mullions on the piers, brushed-metal window frames, and dark opaque
+ * spandrel panels on the bands between floors. Pair it with `style: 'glass'` on the
+ * generator, which drops the arcade, finials, cornices and AC units and runs the
+ * glazing nearly floor-to-ceiling. `buildingBase` lightly tints the metal / spandrel.
+ */
+function createGlassTowerMaterial( buildingBase = color( 0x9fb0b8 ) ) {
+
+	const partId = attribute( 'partId', 'float' );
+
+	const Shaded = struct( { color: 'vec3', roughness: 'float', metalness: 'float', emissive: 'vec3' } );
+
+	const shade = Fn( () => {
+
+		const isGlass = partId.equal( GLASS );
+		const isPier = partId.equal( PIER );
+		const isFrame = partId.equal( FRAME );
+
+		const colorOut = vec3( 0 ).toVar();
+		const roughOut = float( 0.3 ).toVar();
+		const metalOut = float( 0 ).toVar();
+		const emissiveOut = vec3( 0 ).toVar();
+
+		If( isGlass, () => {
+
+			// the interior shows through clean, cool-tinted vision glass; a slight
+			// vertical sky gradient over the pane reads as a reflective curtain wall,
+			// and lit offices glow ( cool fluorescent, not warm domestic )
+			const room = interior();
+			const sky = mix( color( 0x23323c ), color( 0x7d97a4 ), uv().y ); // darker sill -> brighter head
+			const glassTint = mix( room.xyz.mul( color( 0x9fb6bd ) ), sky, 0.45 );
+			colorOut.assign( mix( glassTint, buildingBase, 0.08 ) );
+			roughOut.assign( float( 0.05 ) ); // very smooth -> crisp sky reflection
+			metalOut.assign( float( 0.12 ) ); // a touch metallic so the env reflects strongly
+			emissiveOut.assign( room.xyz.mul( room.w ).mul( color( 0xcfe2ff ) ).mul( 2.0 ) ); // office lights
+
+		} ).ElseIf( isPier, () => {
+
+			// slim aluminium mullions
+			colorOut.assign( mix( color( 0x9aa1a4 ), buildingBase, 0.2 ) );
+			roughOut.assign( float( 0.34 ) );
+			metalOut.assign( float( 1.0 ) );
+
+		} ).ElseIf( isFrame, () => {
+
+			// brushed-metal window frame
+			colorOut.assign( color( 0x80878b ) );
+			roughOut.assign( float( 0.42 ) );
+			metalOut.assign( float( 1.0 ) );
+
+		} ).Else( () => {
+
+			// opaque spandrel panels ( the bands between floors ) and the hidden backing:
+			// dark, faintly reflective glass / metal, tinted a little by the building colour
+			colorOut.assign( mix( color( 0x161d23 ), buildingBase.mul( 0.45 ), 0.25 ) );
+			roughOut.assign( float( 0.14 ) );
+			metalOut.assign( float( 0.3 ) );
+
+		} );
+
+		return Shaded( colorOut, roughOut, metalOut, emissiveOut );
+
+	} )();
+
+	const material = new MeshStandardNodeMaterial();
+	material.colorNode = shade.get( 'color' );
+	material.roughnessNode = shade.get( 'roughness' );
+	material.metalnessNode = shade.get( 'metalness' );
+	material.emissiveNode = shade.get( 'emissive' );
+	// the scene keeps environmentIntensity low ( 0.25 ) so the sun is the key for the
+	// masonry; the curtain wall lives on its reflections, so it opts back into a strong
+	// env contribution here. flat ( no normalNode ) for the cleanest mirror sheen.
+	material.envMapIntensity = 5;
+
+	return material;
+
+}
+
+export { SkyscraperGenerator, createSkyscraperMaterial, createGlassTowerMaterial };
