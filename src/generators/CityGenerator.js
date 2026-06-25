@@ -7,6 +7,7 @@ import { MeshStandardNodeMaterial } from 'three/webgpu';
 import { cameraPosition, color, float, Fn, fract, fwidth, If, mix, mod, mx_fractal_noise_float, mx_noise_float, normalView, positionView, positionWorld, smoothstep, step, vec4 } from 'three/tsl';
 
 import { SkyscraperGenerator } from './city/SkyscraperGenerator.js';
+import { GlassTowerGenerator } from './city/GlassTowerGenerator.js';
 import { SidewalkGenerator } from './city/SidewalkGenerator.js';
 
 /**
@@ -83,20 +84,35 @@ class CityGenerator {
 
 						const tall = random();
 
-						const generator = new SkyscraperGenerator( {
-							seed: Math.floor( random() * 100000 ),
-							totalHeight: 38 + tall * tall * 114, // a few tall towers, mostly mid-rise
-							footprint: { width: L.lot - 4 - random() * 8, depth: L.lot - 4 - random() * 8 }, // rectangular: width and depth vary independently
-							floorHeight: 3.6 + random() * 1.2,
-							bayWidth: 2 + random() * 1.7,
-							pierWidth: 0.4 + random() * 0.5,
-							pierDepth: 0.3 + random() * 0.4,
-							chamferWidth: onCorner ? 3 + random() * 4 : 0,
-							chamferCornerX: cornerX,
-							chamferCornerZ: cornerZ,
-							setbackDepth: 0.8 + random() * 2,
-							stringCourseEvery: random() < 0.85 ? 3 + Math.floor( random() * 6 ) : 0
-						}, materials.building );
+						// two architectural variants share the grid: weathered terracotta
+						// towers and modern glass curtain-wall towers. the glass ones skew
+						// taller ( the city's high-rises ), so the type is biased by height.
+						const glass = random() < 0.25 + tall * 0.4;
+
+						const generator = glass
+							? new GlassTowerGenerator( {
+								seed: Math.floor( random() * 100000 ),
+								totalHeight: 46 + tall * tall * 150, // glass towers run a little taller
+								footprint: { width: L.lot - 4 - random() * 7, depth: L.lot - 4 - random() * 7 }, // rectangular: width and depth vary independently
+								floorHeight: 3.6 + random() * 0.8,
+								chamferWidth: onCorner ? 3 + random() * 4 : 0,
+								chamferCornerX: cornerX,
+								chamferCornerZ: cornerZ
+							}, materials.glassTower )
+							: new SkyscraperGenerator( {
+								seed: Math.floor( random() * 100000 ),
+								totalHeight: 38 + tall * tall * 114, // a few tall towers, mostly mid-rise
+								footprint: { width: L.lot - 4 - random() * 8, depth: L.lot - 4 - random() * 8 }, // rectangular: width and depth vary independently
+								floorHeight: 3.6 + random() * 1.2,
+								bayWidth: 2 + random() * 1.7,
+								pierWidth: 0.4 + random() * 0.5,
+								pierDepth: 0.3 + random() * 0.4,
+								chamferWidth: onCorner ? 3 + random() * 4 : 0,
+								chamferCornerX: cornerX,
+								chamferCornerZ: cornerZ,
+								setbackDepth: 0.8 + random() * 2,
+								stringCourseEvery: random() < 0.85 ? 3 + Math.floor( random() * 6 ) : 0
+							}, materials.building );
 
 						const building = generator.build();
 						building.position.set( blockX + ( lx + 0.5 ) * L.lot, curb, blockZ + ( lz + 0.5 ) * L.lot );

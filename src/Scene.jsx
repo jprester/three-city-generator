@@ -22,6 +22,33 @@ import {
   createSkyscraperMaterial,
   skyscraperLights,
 } from './generators/city/SkyscraperGenerator.js';
+import { createGlassTowerMaterial } from './generators/city/GlassTowerGenerator.js';
+
+// a per-lot cell hash: maps a world-space fragment to the city-grid lot it sits
+// on and returns a stable hash( a, b ) for that lot, so a single shared material
+// can pick a per-tower colour without any per-building uniform. `seed` shifts the
+// whole pick. Used by both the terracotta and the glass-tower materials.
+function lotCellHash(layout, seed) {
+  const periodX = layout.blockW + layout.street;
+  const periodZ = layout.blockD + layout.street;
+  const gx = positionWorld.x.add(layout.cityW / 2);
+  const gz = positionWorld.z.add(layout.cityD / 2);
+  const blockIX = floor(gx.div(periodX));
+  const blockIZ = floor(gz.div(periodZ));
+  const cellX = blockIX.mul(layout.lotsX).add(floor(gx.sub(blockIX.mul(periodX)).div(layout.lot)));
+  const cellZ = blockIZ.mul(layout.lotsZ).add(floor(gz.sub(blockIZ.mul(periodZ)).div(layout.lot)));
+  return (a, b) =>
+    fract(sin(cellX.mul(a).add(cellZ.mul(b)).add(seed)).mul(43758.5453));
+}
+
+// pick one colour from a palette by a 0..1 hash ( evenly bucketed )
+function pickFromPalette(palette, pick) {
+  let c = palette[0];
+  for (let i = 1; i < palette.length; i++) {
+    c = mix(c, palette[i], step(i / palette.length, pick));
+  }
+  return c;
+}
 
 // NYC palette, hashed per lot in the city grid so a single shared material
 // dresses the whole skyline — only the picked flat colour differs per tower.
@@ -40,26 +67,30 @@ function buildBuildingMaterial(layout, seed) {
     color(0x4c4943), // dark stone (rare)
   ];
 
-  const periodX = layout.blockW + layout.street;
-  const periodZ = layout.blockD + layout.street;
-  const gx = positionWorld.x.add(layout.cityW / 2);
-  const gz = positionWorld.z.add(layout.cityD / 2);
-  const blockIX = floor(gx.div(periodX));
-  const blockIZ = floor(gz.div(periodZ));
-  const cellX = blockIX.mul(layout.lotsX).add(floor(gx.sub(blockIX.mul(periodX)).div(layout.lot)));
-  const cellZ = blockIZ.mul(layout.lotsZ).add(floor(gz.sub(blockIZ.mul(periodZ)).div(layout.lot)));
-  const cellHash = (a, b) =>
-    fract(sin(cellX.mul(a).add(cellZ.mul(b)).add(seed)).mul(43758.5453));
-
-  const pick = cellHash(127.1, 311.7);
-  let buildingBase = palette[0];
-  for (let i = 1; i < palette.length; i++) {
-    buildingBase = mix(buildingBase, palette[i], step(i / palette.length, pick));
-  }
+  const cellHash = lotCellHash(layout, seed);
+  let buildingBase = pickFromPalette(palette, cellHash(127.1, 311.7));
   buildingBase = buildingBase.mul(cellHash(269.5, 183.3).mul(0.12).add(0.94)); // subtle per-building brightness
 
   // constant across each tower's footprint -> resolve once per vertex (varying)
   return createSkyscraperMaterial(varying(buildingBase));
+}
+
+// curtain-wall glass tints — cool blue / teal / green / steel greys, with a rare
+// bronze — hashed per lot ( seed shifted so the pick decorrelates from the
+// terracotta one ) so the modern towers vary across the skyline.
+function buildGlassMaterial(layout, seed) {
+  const palette = [
+    color(0x3a4e5a), color(0x33454f), color(0x2c3a44), // blue-grey glass
+    color(0x35494a), color(0x3d524f), // teal / green-grey
+    color(0x44505a), color(0x4c5860), // neutral steel
+    color(0x5a4c3a), // bronze (rare)
+  ];
+
+  const cellHash = lotCellHash(layout, seed + 97);
+  let tint = pickFromPalette(palette, cellHash(127.1, 311.7));
+  tint = tint.mul(cellHash(269.5, 183.3).mul(0.16).add(0.92)); // subtle per-building brightness
+
+  return createGlassTowerMaterial(varying(tint));
 }
 
 // Position the sun for the given time of day and drive the key light from it.
@@ -218,8 +249,9 @@ export default function Scene() {
     const nightAmbient = new THREE.AmbientLight(0x222a3a, 0);
     scene.add(nightAmbient);
 
-    // one shared building material, built once (seed baked in, as in the example)
+    // one shared material per building type, built once (seed baked in, as in the example)
     const material = buildBuildingMaterial(city.layout, 1);
+    const glassMaterial = buildGlassMaterial(city.layout, 1);
 
     ctx.current = {
       pmrem,
@@ -235,6 +267,7 @@ export default function Scene() {
       nightFill: 0.6,
       timeOfDay: 20,
       material,
+      glassMaterial,
       cityGroup: null,
     };
 
@@ -271,7 +304,7 @@ export default function Scene() {
 
     if (c.cityGroup) scene.remove(c.cityGroup);
     c.city.parameters.seed = seed;
-    c.cityGroup = c.city.build({ building: c.material });
+    c.cityGroup = c.city.build({ building: c.material, glassTower: c.glassMaterial });
     scene.add(c.cityGroup);
     gl.shadowMap.needsUpdate = true; // new geometry -> re-bake the frozen shadow map once
     // eslint-disable-next-line react-hooks/exhaustive-deps
