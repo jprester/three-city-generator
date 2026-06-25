@@ -15,7 +15,7 @@
     "leva": "^0.10.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "three": "^0.184.0"
+    "three": "^0.185.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",

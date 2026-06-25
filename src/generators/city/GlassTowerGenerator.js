@@ -1,4 +1,6 @@
 import {
+	InterpolationSamplingMode,
+	InterpolationSamplingType,
 	Matrix4,
 	Mesh,
 	MeshStandardMaterial,
@@ -7,7 +9,7 @@ import {
 } from 'three';
 
 import { MeshStandardNodeMaterial } from 'three/webgpu';
-import { attribute, color, float, Fn, If, mix, mx_fractal_noise_float, mx_noise_float, positionWorld, smoothstep, struct, vec3 } from 'three/tsl';
+import { attribute, color, float, Fn, If, mix, mx_fractal_noise_float, mx_noise_float, positionWorld, smoothstep, struct, varying, vec3 } from 'three/tsl';
 
 import {
 	bakeGroups,
@@ -252,7 +254,7 @@ function buildGlassGeometry( p, mW, visionH ) {
  */
 function createGlassTowerMaterial( buildingBase = color( 0x33414d ) ) {
 
-	const partId = attribute( 'partId', 'float' );
+	const partId = varying( attribute( 'partId', 'float' ) ).setInterpolation( InterpolationSamplingType.FLAT, InterpolationSamplingMode.EITHER ); // flat: a per-face id must not interpolate, or the equal() zone tests below miss on the rounding
 
 	// one Fn returning a struct, so the warp-coherent partId branch is taken once and
 	// feeds every material node ( and the interior raymarch only runs on glass )

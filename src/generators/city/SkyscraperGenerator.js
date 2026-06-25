@@ -1,6 +1,8 @@
 import {
 	BoxGeometry,
 	ExtrudeGeometry,
+	InterpolationSamplingMode,
+	InterpolationSamplingType,
 	LatheGeometry,
 	Matrix4,
 	Mesh,
@@ -13,7 +15,7 @@ import {
 } from 'three';
 
 import { MeshStandardNodeMaterial } from 'three/webgpu';
-import { attribute, color, float, floor, Fn, fract, fwidth, If, mix, mod, mx_fractal_noise_float, mx_noise_float, normalWorldGeometry, positionLocal, positionWorld, select, sin, smoothstep, step, struct, uv, vec3 } from 'three/tsl';
+import { attribute, color, float, floor, Fn, fract, fwidth, hash as ihash, If, mix, mod, mx_fractal_noise_float, mx_noise_float, normalWorldGeometry, positionLocal, positionWorld, select, smoothstep, step, struct, uint, uv, varying, vec3 } from 'three/tsl';
 
 import {
 	bakeGroups,
@@ -146,7 +148,8 @@ class SkyscraperGenerator {
 		// collects only instance matrices; the repeating field ( piers, windows, glass,
 		// finials ) is instanced too. only the base arcade needs real geometry.
 
-		const boxes = []; // matrices for the axis-aligned shell boxes
+		const boxes = []; // matrices for the axis-aligned shell boxes ( facade-side: spandrels, cornices, parapets )
+		const backWalls = []; // the thin wall closing the volume behind the glass — baked last so its hidden fragments depth-reject
 		const extras = []; // bespoke shell geometry: the base arcade
 		const windows = [];
 		const glass = [];
@@ -184,8 +187,8 @@ class SkyscraperGenerator {
 		// closes the volume behind the glass, with the facade grid (piers +
 		// spandrel bands) built in front of it
 
-		for ( const frame of faces ) addWall( boxes, frame, baseTop, shaftTop, 0.8, - 0.6 );
-		for ( const frame of crownFaces ) addWall( boxes, frame, shaftTop, p.totalHeight, 0.8, - 0.6 );
+		for ( const frame of faces ) addWall( backWalls, frame, baseTop, shaftTop, 0.8, - 0.6 );
+		for ( const frame of crownFaces ) addWall( backWalls, frame, shaftTop, p.totalHeight, 0.8, - 0.6 );
 
 		// setback ledge: a thin slab capping the shaft footprint where the
 		// crown steps in, and a roof cap closing the crown
@@ -265,6 +268,11 @@ class SkyscraperGenerator {
 			groups.push( { geometry: nonIndexed( geometry ), matrices: [ _identity ], partId: WALL, rigid: true } );
 
 		}
+
+		// baked last: the backing wall sits hidden behind the facade, so by the time it
+		// rasterizes the facade in front has already written depth and early-Z discards its
+		// fragments before they shade — the cheapest the occluded geometry can be
+		groups.push( { geometry: _unitBox, matrices: backWalls, partId: WALL } );
 
 		const geometry = bakeGroups( groups );
 
@@ -723,8 +731,13 @@ function createSkyscraperMaterial( buildingBase = color( 0xc6c0b2 ) ) {
 	const wallFacing = smoothstep( 0.7, 0.45, nrm.y ); // brick only on vertical walls — not roofs, ledges, cornice tops
 	const joint = lineU.max( lineV ).mul( wallFacing );
 
-	const brickRnd = fract( sin( courseRow.mul( 78.233 ).add( floor( colCoord ).mul( 12.9898 ) ) ).mul( 43758.5453 ) );
-	const brickRnd2 = fract( sin( courseRow.mul( 39.425 ).add( floor( colCoord ).mul( 56.171 ) ) ).mul( 24634.711 ) ); // independent per-brick hash for hue
+	// per-brick randomness from an integer spatial hash ( course row × brick column ): an
+	// integer hash has none of the precision banding sin()-based hashing develops far from
+	// the origin, so the per-brick variation stays even across a tall tower. brickRnd2 reuses
+	// the same key + 1 for an independent, equally cheap second value for the hue shift.
+	const brickKey = uint( courseRow.add( 1 << 16 ) ).mul( uint( 73856093 ) ).bitXor( uint( floor( colCoord ).add( 1 << 16 ) ).mul( uint( 19349663 ) ) ).toVar();
+	const brickRnd = ihash( brickKey );
+	const brickRnd2 = ihash( brickKey.add( uint( 1 ) ) ); // independent per-brick hash for hue
 
 	// soft brick relief for the bump: each brick is a gently domed mound falling to the
 	// recessed mortar over a bevel ( distU / distV are the distance to the nearest column /
@@ -746,7 +759,7 @@ function createSkyscraperMaterial( buildingBase = color( 0xc6c0b2 ) ) {
 	// ( joint, reliefHeight, texel ) were taken above in uniform control flow, so the
 	// branches only read their results, never call fwidth / dFdx themselves.
 
-	const partId = attribute( 'partId', 'float' );
+	const partId = varying( attribute( 'partId', 'float' ) ).setInterpolation( InterpolationSamplingType.FLAT, InterpolationSamplingMode.EITHER ); // flat: a per-face id must not interpolate, or the equal() zone tests below miss on the rounding
 
 	// the whole per-zone shade is one Fn returning a struct, so the warp-coherent
 	// partId branch is taken once and feeds every material node. ( If / toVar need a
